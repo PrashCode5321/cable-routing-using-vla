@@ -26,7 +26,7 @@ def position_printer(
             code1, pose = arm.get_position(is_radian=True)
             code2, state = arm.get_servo_angle(is_radian=True)
             frame = zed.image
-            print(f"[Position] {pose} | [State] {state} | [Frame Shape] {frame.shape if frame is not None else None}")
+            # print(f"[Position] {pose} | [State] {state} | [Frame Shape] {frame.shape if frame is not None else None}")
             if code1 == 0 and code2 == 0 and frame is not None:
                 pose_h = np.append(np.asarray(pose, dtype=np.float32), 1.0)
                 raw_samples.append(
@@ -158,4 +158,99 @@ def post_process_samples(raw_samples: list) -> dict:
         "action_joint_states": action_joint_states,
         "action_ee_poses": action_ee_poses,
     }
+
+
+def video_writer(
+    raw_samples: list,
+    stop_event: threading.Event,
+    output_dir: str = "./episodes",
+    fps: float = 10.0,
+    frame_idx: int = 0,
+) -> str:
+    """Write frames from raw_samples to a video file in a separate thread.
+    
+    Args:
+        raw_samples: List of sample dicts (populated by position_printer)
+        stop_event: Threading event to signal when to stop
+        output_dir: Directory to save video
+        fps: Frames per second for video
+        frame_idx: Index to match with HDF5 episode (auto-increment if None)
+    
+    Returns:
+        Path to saved video file
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Find next video index
+    existing = sorted(output_dir.glob("episode_*.mp4"))
+    video_idx = int(existing[-1].stem.split("_")[1]) + 1 if existing else 0
+    
+    video_path = output_dir / f"episode_{video_idx:04d}.mp4"
+    
+    # Will be initialized when first frame arrives
+    writer = None
+    frame_width = None
+    frame_height = None
+    codec = cv2.VideoWriter_fourcc(*'mp4v')
+    
+    last_frame_count = 0
+    
+    print(f"[VideoWriter] Starting video writer (target: {fps} fps, output: {video_path})")
+    
+    try:
+        while not stop_event.is_set():
+            # Check if new frames arrived
+            current_frame_count = len(raw_samples)
+            
+            if current_frame_count > last_frame_count and current_frame_count > 0:
+                # Get the latest frame
+                latest_frame = raw_samples[-1]["frame"]
+                
+                # Initialize writer on first frame
+                if writer is None:
+                    h, w = latest_frame.shape[:2]
+                    frame_height, frame_width = h, w
+                    writer = cv2.VideoWriter(
+                        str(video_path), 
+                        codec, 
+                        fps, 
+                        (frame_width, frame_height)
+                    )
+                    if not writer.isOpened():
+                        raise RuntimeError(f"Failed to open video writer for {video_path}")
+                    print(f"[VideoWriter] Initialized: {frame_width}x{frame_height} @ {fps} fps")
+                
+                # Write the frame (convert BGRA to BGR if needed)
+                if latest_frame.shape[2] == 4:
+                    # BGRA -> BGR
+                    frame_to_write = cv2.cvtColor(latest_frame, cv2.COLOR_BGRA2BGR)
+                else:
+                    frame_to_write = latest_frame
+                
+                writer.write(frame_to_write.astype(np.uint8))
+                last_frame_count = current_frame_count
+            
+            # Small sleep to avoid busy-waiting
+            time.sleep(0.01)
+        
+        # Final write of any remaining frames
+        if writer is not None:
+            for i in range(last_frame_count, len(raw_samples)):
+                frame = raw_samples[i]["frame"]
+                if frame.shape[2] == 4:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                writer.write(frame.astype(np.uint8))
+        
+        print(f"[VideoWriter] ✓ Wrote {len(raw_samples)} frames to {video_path}")
+        
+    except Exception as e:
+        print(f"[VideoWriter] ✗ Error: {e}")
+        return None
+    
+    finally:
+        if writer is not None:
+            writer.release()
+    
+    return str(video_path)
 

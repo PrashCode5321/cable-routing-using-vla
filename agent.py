@@ -24,12 +24,13 @@ from typing import Any, Literal, List, Tuple, Dict
 from dataclasses import dataclass, field
 
 from langgraph.graph import StateGraph, END
-import anthropic
+# import anthropic
 import numpy as np
 
 from detector import BracketDetector
 from planner import ActionPlanner
 from utils.zed_camera import ZedCamera
+from utils.vis_utils import draw_pose_axes
 from record import position_printer, post_process_samples
 
 
@@ -52,6 +53,7 @@ class RoutingState:
     error_message: str = None                     # Error message if something fails
     status: str = "parsing"                       # Current status
     zed_camera: ZedCamera = None                  # Shared camera instance
+    bracket_detector: BracketDetector = None
     action_planner: ActionPlanner = None          # Shared planner instance
     motion_stream_seconds: float = 3.0            # Seconds to stream after motion
 
@@ -75,7 +77,7 @@ def determine_clip_type(bracket_id: int) -> str:
         clip_types.append('y')
     if bracket_id % 4 == 0:
         clip_types.append('c')
-    if bracket_id % 5 == 0:
+    if bracket_id % 7 == 0:
         clip_types.append('r')
     
     if not clip_types:
@@ -123,13 +125,11 @@ def extract_bracket_ids_with_llm(instruction: str) -> list[int]:
         client = anthropic.Anthropic()
         
         prompt = f"""Extract the sequence of bracket IDs from this routing instruction.
-        
-Instruction: "{instruction}"
-
-Return ONLY a JSON object with a single "bracket_ids" field containing an array of integers.
-Example: {{"bracket_ids": [8, 5]}}
-
-If no bracket IDs can be extracted, return {{"bracket_ids": []}}"""
+        Instruction: "{instruction}"
+        Return ONLY a JSON object with a single "bracket_ids" field containing an array of integers.
+        Example: {{"bracket_ids": [8, 5]}}
+        If no bracket IDs can be extracted, return {{"bracket_ids": []}}
+        """
         
         message = client.messages.create(
             model="claude-3-5-sonnet-20241022",
@@ -171,20 +171,20 @@ def parse_routing_instruction(state: RoutingState) -> RoutingState:
         state.status = "brackets_extracted"
         return state
     
-    # Fall back to LLM for complex natural language
-    print("[Parser] Attempting LLM-based extraction for complex instruction...")
-    bracket_ids = extract_bracket_ids_with_llm(instruction)
+    # # Fall back to LLM for complex natural language
+    # print("[Parser] Attempting LLM-based extraction for complex instruction...")
+    # bracket_ids = extract_bracket_ids_with_llm(instruction)
     
-    if bracket_ids:
-        print(f"[Parser] LLM extracted bracket IDs: {bracket_ids}")
-        state.requested_bracket_ids = bracket_ids
-        state.status = "brackets_extracted"
-    else:
-        state.error_message = f"Could not parse bracket IDs from: '{instruction}'"
-        state.status = "parse_error"
-        print(f"[Parser] Error: {state.error_message}")
+    # if bracket_ids:
+    #     print(f"[Parser] LLM extracted bracket IDs: {bracket_ids}")
+    #     state.requested_bracket_ids = bracket_ids
+    #     state.status = "brackets_extracted"
+    # else:
+    #     state.error_message = f"Could not parse bracket IDs from: '{instruction}'"
+    #     state.status = "parse_error"
+    #     print(f"[Parser] Error: {state.error_message}")
     
-    return state
+    # return state
 
 
 # ============================================================================
@@ -204,13 +204,13 @@ def detect_and_filter_brackets(state: RoutingState) -> RoutingState:
         state.zed_camera = ZedCamera()
         cv_image = state.zed_camera.image
         
-        detector = BracketDetector(
+        state.bracket_detector = BracketDetector(
             observation=cv_image,
             intrinsic=state.zed_camera.camera_intrinsic,
         )
         
         print(f"[Detector] Scanning workspace for all brackets...")
-        all_detected = detector.identify_april_tag_ids()
+        all_detected = state.bracket_detector.identify_april_tag_ids()
         
         if not all_detected:
             state.error_message = "No brackets detected in workspace"
@@ -241,6 +241,20 @@ def detect_and_filter_brackets(state: RoutingState) -> RoutingState:
             return state
         
         print(f"[Detector] All requested brackets detected: {state.filtered_bracket_ids}")
+
+        for bracket in state.filtered_bracket_ids:
+            pose = state.detected_brackets[bracket]
+            draw_pose_axes(image=cv_image, camera_intrinsic=state.zed_camera.camera_intrinsic, pose=pose)
+        
+        cv2.namedWindow("Verifying Tag Poses", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("Verifying Tag Poses", 1280, 720)
+        cv2.imshow("Verifying Tag Poses", cv_image)
+        key = cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        if key != ord("k"):
+            raise("Aborted by user.")
+        
         state.status = "ready_to_plan"
         return state
         
@@ -271,13 +285,7 @@ def build_combined_plan(state: RoutingState) -> RoutingState:
     
     try:
         # Initialize planner with detector camera pose
-        cv_image = state.zed_camera.image
-        detector = BracketDetector(
-            observation=cv_image,
-            intrinsic=state.zed_camera.camera_intrinsic,
-        )
-        
-        state.action_planner = ActionPlanner(camera_pose=detector.camera_pose)
+        state.action_planner = ActionPlanner(camera_pose=state.bracket_detector.camera_pose)
         state.action_planner.arm.close_lite6_gripper(sync=True)
         
         # Build plan for each bracket
@@ -340,7 +348,7 @@ def execute_combined_plan(state: RoutingState) -> RoutingState:
         
         # Execute the combined plan
         print(f"[Executor] Executing {len(state.combined_motion_plan)} motion steps...")
-        state.action_planner.execute_motion_plan(state.combined_motion_plan)
+        state.action_planner.execute_plan(state.combined_motion_plan)
         
         print(f"[Executor] Motion execution complete, streaming additional {state.motion_stream_seconds}s...")
         stop_event.wait(state.motion_stream_seconds)
@@ -400,14 +408,13 @@ def process_and_save_data(state: RoutingState) -> RoutingState:
     print(f"\n[PostProcess] Processing {len(state.raw_samples)} raw samples...")
     
     try:
-        state.processed_data = post_process_samples(state.raw_samples)
-        
+        processed_data = post_process_samples(state.raw_samples)
         print(f"[PostProcess] Data shapes:")
-        print(f"  - joint_states: {state.processed_data['joint_states'].shape}")
-        print(f"  - ee_poses: {state.processed_data['ee_poses'].shape}")
-        print(f"  - frames_224: {state.processed_data['frames_224'].shape}")
-        print(f"  - action_joint_states: {state.processed_data['action_joint_states'].shape}")
-        print(f"  - action_ee_poses: {state.processed_data['action_ee_poses'].shape}")
+        print(f"  - joint_states: {processed_data['joint_states'].shape}")
+        print(f"  - ee_poses: {processed_data['ee_poses'].shape}")
+        print(f"  - frames_224: {processed_data['frames_224'].shape}")
+        print(f"  - action_joint_states: {processed_data['action_joint_states'].shape}")
+        print(f"  - action_ee_poses: {processed_data['action_ee_poses'].shape}")
         
         state.status = "complete"
         return state
@@ -423,22 +430,12 @@ def process_and_save_data(state: RoutingState) -> RoutingState:
 # Routing Logic
 # ============================================================================
 
-def route_condition(state: RoutingState) -> Literal["detect", "plan", "execute", "process", "error", "done"]:
-    """Determine the next node based on current state."""
-    status_to_node = {
-        "brackets_extracted": "detect",
-        "ready_to_plan": "plan",
-        "ready_to_execute": "execute",
-        "post_processing": "process",
-        "execution_error": "process",
-        "complete": "done",
-        "parse_error": "error",
-        "detection_error": "error",
-        "missing_brackets": "error",
-        "planning_error": "error",
-        "postprocess_error": "error",
-    }
-    return status_to_node.get(state.status, "done")
+ERROR_STATUSES = {"parse_error", "detection_error", "missing_brackets", 
+                  "planning_error", "execution_error", "postprocess_error"}
+
+def should_error(state: RoutingState) -> bool:
+    """Check if current state indicates an error."""
+    return state.status in ERROR_STATUSES
 
 
 # ============================================================================
@@ -446,7 +443,11 @@ def route_condition(state: RoutingState) -> Literal["detect", "plan", "execute",
 # ============================================================================
 
 def build_routing_graph():
-    """Build the Langgraph routing agent."""
+    """Build the Langgraph routing agent with sequential flow and error handling.
+    
+    Flow: parse → detect → plan → execute → process → END
+    Error routing: any error status → error → END
+    """
     workflow = StateGraph(RoutingState)
     
     # Add nodes
@@ -455,77 +456,38 @@ def build_routing_graph():
     workflow.add_node("plan", build_combined_plan)
     workflow.add_node("execute", execute_combined_plan)
     workflow.add_node("process", process_and_save_data)
-    workflow.add_node("error", lambda state: state)  # No-op error handler
+    workflow.add_node("error", lambda state: state)  # Error handler (no-op)
     
     # Set entry point
     workflow.set_entry_point("parse")
     
-    # Add conditional edges from each node
+    # Sequential conditional flow with error handling
     workflow.add_conditional_edges(
         "parse",
-        route_condition,
-        {
-            "detect": "detect",
-            "plan": "plan",
-            "execute": "execute",
-            "process": "process",
-            "error": "error",
-            "done": END,
-        }
+        lambda state: "error" if should_error(state) else "detect",
+        {"error": "error", "detect": "detect"}
     )
     
     workflow.add_conditional_edges(
         "detect",
-        route_condition,
-        {
-            "detect": "detect",
-            "plan": "plan",
-            "execute": "execute",
-            "process": "process",
-            "error": "error",
-            "done": END,
-        }
+        lambda state: "error" if should_error(state) else "plan",
+        {"error": "error", "plan": "plan"}
     )
     
     workflow.add_conditional_edges(
         "plan",
-        route_condition,
-        {
-            "detect": "detect",
-            "plan": "plan",
-            "execute": "execute",
-            "process": "process",
-            "error": "error",
-            "done": END,
-        }
+        lambda state: "error" if should_error(state) else "execute",
+        {"error": "error", "execute": "execute"}
     )
     
     workflow.add_conditional_edges(
         "execute",
-        route_condition,
-        {
-            "detect": "detect",
-            "plan": "plan",
-            "execute": "execute",
-            "process": "process",
-            "error": "error",
-            "done": END,
-        }
+        lambda state: "error" if should_error(state) else "process",
+        {"error": "error", "process": "process"}
     )
     
-    workflow.add_conditional_edges(
-        "process",
-        route_condition,
-        {
-            "detect": "detect",
-            "plan": "plan",
-            "execute": "execute",
-            "process": "process",
-            "error": "error",
-            "done": END,
-        }
-    )
-    
+    # End of sequential flow
+    workflow.add_edge("process", END)
     workflow.add_edge("error", END)
     
     return workflow.compile()
@@ -547,7 +509,7 @@ def route_cable(instruction: str, stream_seconds: float = 3.0, task_name: str = 
         Dictionary with execution results and processed data
     """
     graph = build_routing_graph()
-    
+    graph.get_graph().draw_mermaid_png(output_file_path=str("flow.png"))
     initial_state = RoutingState(
         user_instruction=instruction,
         motion_stream_seconds=stream_seconds
@@ -561,28 +523,8 @@ def route_cable(instruction: str, stream_seconds: float = 3.0, task_name: str = 
     
     result = graph.invoke(initial_state)
     
-    print("\n" + "=" * 80)
     print(f"📊 Routing Complete")
-    print(f"   Status: {result.status}")
-    print(f"   Brackets processed: {len(result.execution_results)}")
-    if result.execution_results:
-        for res in result.execution_results:
-            status_icon = "✓" if res["status"] == "success" else "✗"
-            print(f"     {status_icon} Bracket {res['bracket_id']} ({res['clip_type'].upper()}): {res['status']}")
-    if result.error_message:
-        print(f"   Error: {result.error_message}")
-    if result.processed_data:
-        print(f"   Data collected: {result.processed_data['joint_states'].shape[0]} frames")
-    print("=" * 80 + "\n")
-    
-    return {
-        "status": result.status,
-        "requested_bracket_ids": result.requested_bracket_ids,
-        "filtered_bracket_ids": result.filtered_bracket_ids,
-        "execution_results": result.execution_results,
-        "processed_data": result.processed_data,
-        "error": result.error_message,
-    }
+    return result
 
 
 if __name__ == "__main__":
@@ -590,7 +532,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Route cable through brackets using natural language")
     parser.add_argument("instruction", type=str, help="Natural language routing instruction")
-    parser.add_argument("--stream-seconds", type=float, default=3.0, help="Seconds to stream after motion")
+    parser.add_argument("--stream-seconds", type=float, default=1.0, help="Seconds to stream after motion")
     parser.add_argument("--task-name", type=str, default="cable_routing", help="Task description")
     args = parser.parse_args()
     
@@ -599,9 +541,9 @@ if __name__ == "__main__":
         stream_seconds=args.stream_seconds,
         task_name=args.task_name
     )
-    print(json.dumps({
-        "status": result["status"],
-        "requested_ids": result["requested_bracket_ids"],
-        "filtered_ids": result["filtered_bracket_ids"],
-        "error": result["error"],
-    }, indent=2))
+    result = {k: v for k, v in result.items()
+              if k in [
+                  "user_instruction", "requested_bracket_ids", 
+                  "bracket_clip_types", "execution_results"
+            ]}
+    print(result)

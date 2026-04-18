@@ -12,21 +12,26 @@ from detector import BracketDetector
 from utils.zed_camera import ZedCamera
 from utils.vis_utils import draw_pose_axes
 from planner import ActionPlanner
-from record import position_printer, save_to_hdf5, post_process_samples
+from record import position_printer, save_to_hdf5, post_process_samples, video_writer
 from typing import List
 
 
 def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0) -> dict:
-    zed = ZedCamera()
+    zed = None
     planner = None
     stop_event = threading.Event()
     monitor_thread = None
+    video_thread = None
     raw_samples = []
     processed = None
     plan_completed = False
     stream_until = None
 
     try:
+        print("[Init] Creating ZedCamera...")
+        zed = ZedCamera()
+        print("[Init] ✓ ZedCamera created")
+        
         cv_image = zed.image
         detector = BracketDetector(
             observation=cv_image,
@@ -34,15 +39,6 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0) -> dict
         )
 
         planner = ActionPlanner(camera_pose=detector.camera_pose)
-
-        # Start position monitor thread (10 Hz)
-        monitor_thread = threading.Thread(
-            target=position_printer,
-            args=(planner.arm, zed, stop_event, raw_samples, 10.0),
-            daemon=True,
-        )
-        monitor_thread.start()
-        print("Capturing raw synced data (poses, states, frames) in memory.")
 
         print("Scanned the workspace")
         results = detector.identify_april_tag_ids()
@@ -63,6 +59,25 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0) -> dict
             print("Aborted by user.")
             return None
 
+        # Start position monitor thread (10 Hz)
+        monitor_thread = threading.Thread(
+            target=position_printer,
+            args=(planner.arm, zed, stop_event, raw_samples, 10.0),
+            daemon=True,
+        )
+        monitor_thread.start()
+        print("Capturing raw synced data (poses, states, frames) in memory.")
+
+        # Start video writer thread (writes frames to MP4 in parallel)
+        video_thread = threading.Thread(
+            target=video_writer,
+            args=(raw_samples, stop_event, "./episodes", 10.0),
+            daemon=True,
+        )
+        video_thread.start()
+        print("Recording video to demonstrations/episode_XXXX.mp4")
+        time.sleep(0.5)
+
         plan = []
         planner.arm.close_lite6_gripper(sync=True)
         for result in results:
@@ -77,7 +92,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0) -> dict
                 plan.extend(planner.y_clip_plan(clip_pose=t_cam_clip))
             elif tag_id % 4 == 0:
                 plan.extend(planner.c_clip_plan(clip_pose=t_cam_clip))
-            elif tag_id % 5 == 0:
+            elif tag_id % 7 == 0:
                 plan.extend(planner.r_clip_plan(clip_pose=t_cam_clip))
             else:
                 raise ValueError("tag_id does not correspond to a known plan")
@@ -88,34 +103,68 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0) -> dict
         stream_until = time.time() + max(0.0, post_plan_stream_seconds)
 
     finally:
+        # 1. Shutdown planner (stop motion)
         if planner is not None:
-            planner.shutdown()
+            try:
+                print("[Cleanup] Shutting down planner...")
+                planner.shutdown()
+                print("[Cleanup] ✓ Planner shutdown")
+            except Exception as e:
+                print(f"[Cleanup] ✗ Planner shutdown error: {e}")
 
+        # 2. Wait for remaining stream time
         if plan_completed and stream_until is not None:
             remaining = stream_until - time.time()
             if remaining > 0:
-                print(f"[Position] Continuing stream for {remaining:.1f}s after plan completion...")
+                print(f"[Cleanup] Continuing stream for {remaining:.1f}s after plan completion...")
                 stop_event.wait(remaining)
 
+        # 3. Stop threads and wait for them to finish
+        print("[Cleanup] Stopping threads...")
         stop_event.set()
+        
         if monitor_thread is not None:
-            monitor_thread.join(timeout=1.0)
+            try:
+                monitor_thread.join(timeout=2.0)
+                print("[Cleanup] ✓ Position monitor stopped")
+            except Exception as e:
+                print(f"[Cleanup] ✗ Monitor join error: {e}")
+        
+        if video_thread is not None:
+            try:
+                video_thread.join(timeout=3.0)
+                print("[Cleanup] ✓ Video writer stopped")
+            except Exception as e:
+                print(f"[Cleanup] ✗ Video thread join error: {e}")
+        
+        # 4. Process data (before closing camera, in case it's still needed)
+        try:
+            print("[Cleanup] Post-processing samples...")
+            processed = post_process_samples(raw_samples)
+            print(f"[Post] Raw samples: {len(raw_samples)}")
+            print(f"[Post] joint_states shape: {processed['joint_states'].shape}")
+            print(f"[Post] ee_poses shape: {processed['ee_poses'].shape}")
+            print(f"[Post] frames_full shape: {processed['frames_full'].shape}")
+            print(f"[Post] frames_224 shape: {processed['frames_224'].shape}")
+            print(f"[Post] action_joint_states shape: {processed['action_joint_states'].shape}")
+            print(f"[Post] action_ee_poses shape: {processed['action_ee_poses'].shape}")
 
-        processed = post_process_samples(raw_samples)
-        print(f"[Post] Raw samples: {len(raw_samples)}")
-        print(f"[Post] joint_states shape: {processed['joint_states'].shape}")
-        print(f"[Post] ee_poses shape: {processed['ee_poses'].shape}")
-        print(f"[Post] frames_full shape: {processed['frames_full'].shape}")
-        print(f"[Post] frames_224 shape: {processed['frames_224'].shape}")
-        print(f"[Post] action_joint_states shape: {processed['action_joint_states'].shape}")
-        print(f"[Post] action_ee_poses shape: {processed['action_ee_poses'].shape}")
+            if processed["joint_states"].size > 0:
+                print("[Post] First joint state:", np.round(processed["joint_states"][0], 2))
+                print("[Post] First EE pose (translation in m, rotation in rad, gripper):", np.round(processed["ee_poses"][0], 4))
+        except Exception as e:
+            print(f"[Cleanup] ✗ Post-processing error: {e}")
 
-        if processed["joint_states"].size > 0:
-            print("[Post] First joint state:", np.round(processed["joint_states"][0], 2))
-            print("[Post] First EE pose (translation in m, rotation in rad, gripper):", np.round(processed["ee_poses"][0], 4))
-
-        zed.close()
-    
+        # 5. Close camera (last step, after all threads are stopped)
+        if zed is not None:
+            try:
+                print("[Cleanup] Closing ZedCamera...")
+                zed.close()
+                print("[Cleanup] ✓ ZedCamera closed")
+            except Exception as e:
+                print(f"[Cleanup] ✗ ZedCamera close error: {e}")
+        
+        print("[Cleanup] ✓ Cleanup complete")
     return processed
 
 
@@ -134,11 +183,13 @@ if __name__ == "__main__":
     
     # Save to HDF5 if data was successfully collected
     if processed is not None and processed["joint_states"].size > 0:
+        print("saving episode")
+        success = bool(input("Was the episode successful? (y/n): ").lower() == 'y')
         save_to_hdf5(
             processed=processed,
             output_dir=args.demo_dir,
             task_name=args.task_name,
-            success=True
+            success=success
         )
     
     print("Total time:", round(time.time() - start, 2), "s")

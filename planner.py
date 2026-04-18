@@ -31,6 +31,13 @@ class ActionPlanner:
 
     def shutdown(self):
         self.arm.open_lite6_gripper(sync=True)
+        self.arm.set_pause_time(sltime=0.2, wait=True)
+        _, safe = self.arm.get_position(is_radian=False)
+        self.arm.set_position(
+            x=safe[0], y=safe[1], z=safe[2]+20, 
+            roll=safe[3], pitch=safe[4], yaw=safe[5],
+            is_radian=False, speed=100, wait=True
+        )
         self.arm.move_gohome(speed=100, wait=True)
         self.arm.close_lite6_gripper(sync=True)
         self.arm.set_pause_time(sltime=0.2, wait=True)
@@ -51,7 +58,7 @@ class ActionPlanner:
 
     def pose_to_command(self, pose: np.array) -> dict:
         roll, pitch, yaw = Rotation.from_matrix(pose[:3, :3]).as_euler("xyz", degrees=True)
-        yaw = self.equivalent_yaw(yaw)
+        # yaw = self.equivalent_yaw(yaw)
         x_m, y_m, z_m, _ = pose[:, 3].flatten()
         return {"x": x_m * 1000, "y": y_m * 1000, "z": z_m * 1000,
             "roll": roll, "pitch": pitch, "yaw": yaw,

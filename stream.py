@@ -16,7 +16,7 @@ from record import position_printer, save_to_hdf5, post_process_samples, video_w
 from typing import List
 
 
-def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0) -> dict:
+def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_name: str = "clip_pickup") -> dict:
     zed = None
     planner = None
     stop_event = threading.Event()
@@ -140,7 +140,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0) -> dict
         # 4. Process data (before closing camera, in case it's still needed)
         try:
             print("[Cleanup] Post-processing samples...")
-            processed = post_process_samples(raw_samples)
+            processed = post_process_samples(raw_samples, task_name=task_name)
             print(f"[Post] Raw samples: {len(raw_samples)}")
             print(f"[Post] joint_states shape: {processed['joint_states'].shape}")
             print(f"[Post] ee_poses shape: {processed['ee_poses'].shape}")
@@ -179,7 +179,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     start = time.time()
-    processed = run(tag_ids=args.tag_ids)
+    processed = run(tag_ids=args.tag_ids, task_name=args.task_name)
     
     # Save to HDF5 if data was successfully collected
     if processed is not None and processed["joint_states"].size > 0:

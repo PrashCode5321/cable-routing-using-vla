@@ -1,6 +1,6 @@
 from transformers import AutoModelForVision2Seq, AutoProcessor
 from utils.zed_camera import ZedCamera
-from checkpoint0 import get_transform_camera_robot
+from utils.workspace_check import get_transform_camera_robot
 from xarm.wrapper import XArmAPI
 from utils import presets
 from PIL import Image

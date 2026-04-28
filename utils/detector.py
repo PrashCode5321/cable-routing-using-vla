@@ -1,5 +1,5 @@
 from utils.vis_utils import draw_pose_axes, get_workspace_mask
-from checkpoint0 import get_transform_camera_robot
+from utils.workspace_check import get_transform_camera_robot
 from utils.zed_camera import ZedCamera
 from pupil_apriltags import Detector
 from typing import Dict, List, Tuple

@@ -8,11 +8,11 @@ import threading
 import time
 import cv2
 import numpy as np
-from detector import BracketDetector
+from utils.detector import BracketDetector
 from utils.zed_camera import ZedCamera
 from utils.vis_utils import draw_pose_axes
-from planner import ActionPlanner
-from record import position_printer, save_to_hdf5, post_process_samples, video_writer
+from utils.planner import ActionPlanner
+from utils.record import position_printer, save_to_hdf5, post_process_samples, video_writer
 from typing import List
 
 
@@ -71,7 +71,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         # Start video writer thread (writes frames to MP4 in parallel)
         video_thread = threading.Thread(
             target=video_writer,
-            args=(raw_samples, stop_event, "./episodes", 10.0),
+            args=(raw_samples, stop_event, "./demonstrations", 10.0),
             daemon=True,
         )
         video_thread.start()
@@ -170,12 +170,12 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tag-ids", type=int, nargs='+', default=[8],
+    parser.add_argument("--tag-ids", type=int, nargs='+', default=[6],
                        help="Tag IDs to route through (space-separated, e.g., 8 5 3)")
     parser.add_argument("--task-name", type=str, default="clip_pickup", 
                        help="Language instruction for the task")
-    parser.add_argument("--demo-dir", type=str, default="./demonstrations",
-                       help="Directory to save demonstrations")
+    parser.add_argument("--demo-dir", type=str, default="./episodes",
+                       help="Directory to save demonstration episodes (HDF5 files)")
     args = parser.parse_args()
 
     start = time.time()
@@ -184,12 +184,12 @@ if __name__ == "__main__":
     # Save to HDF5 if data was successfully collected
     if processed is not None and processed["joint_states"].size > 0:
         print("saving episode")
-        success = bool(input("Was the episode successful? (y/n): ").lower() == 'y')
+        # success = bool(input("Was the episode successful? (y/n): ").lower() == 'y')
         save_to_hdf5(
             processed=processed,
             output_dir=args.demo_dir,
             task_name=args.task_name,
-            success=success
+            success=True
         )
     
     print("Total time:", round(time.time() - start, 2), "s")

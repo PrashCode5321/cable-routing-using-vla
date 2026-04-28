@@ -5,7 +5,7 @@ from utils import presets
 from utils.zed_camera import ZedCamera
 from utils.vis_utils import draw_pose_axes
 from scipy.spatial.transform import Rotation
-from detector import BracketDetector
+from utils.detector import BracketDetector
 from typing import List
 
 SPEED = 100  # conservative speed for precision work

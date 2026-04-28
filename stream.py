@@ -1,4 +1,6 @@
 import os
+import glob
+import gc
 
 # Prevent Qt font warnings from OpenCV HighGUI by pointing to system fonts.
 os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype/dejavu")
@@ -16,8 +18,9 @@ from utils.record import position_printer, save_to_hdf5, post_process_samples, v
 from typing import List
 
 
-def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_name: str = "clip_pickup") -> dict:
+def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_name: str = "clip_pickup", fps: int = 5) -> dict:
     zed = None
+    detector = None
     planner = None
     stop_event = threading.Event()
     monitor_thread = None
@@ -28,7 +31,6 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
     stream_until = None
 
     try:
-        print("[Init] Creating ZedCamera...")
         zed = ZedCamera()
         print("[Init] ✓ ZedCamera created")
         
@@ -62,7 +64,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         # Start position monitor thread (10 Hz)
         monitor_thread = threading.Thread(
             target=position_printer,
-            args=(planner.arm, zed, stop_event, raw_samples, 10.0),
+            args=(planner.arm, zed, stop_event, raw_samples, float(fps)),
             daemon=True,
         )
         monitor_thread.start()
@@ -71,7 +73,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         # Start video writer thread (writes frames to MP4 in parallel)
         video_thread = threading.Thread(
             target=video_writer,
-            args=(raw_samples, stop_event, "./demonstrations", 10.0),
+            args=(raw_samples, stop_event, "./demonstrations", float(fps)),
             daemon=True,
         )
         video_thread.start()
@@ -141,13 +143,13 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         try:
             print("[Cleanup] Post-processing samples...")
             processed = post_process_samples(raw_samples, task_name=task_name)
-            print(f"[Post] Raw samples: {len(raw_samples)}")
-            print(f"[Post] joint_states shape: {processed['joint_states'].shape}")
-            print(f"[Post] ee_poses shape: {processed['ee_poses'].shape}")
-            print(f"[Post] frames_full shape: {processed['frames_full'].shape}")
-            print(f"[Post] frames_224 shape: {processed['frames_224'].shape}")
-            print(f"[Post] action_joint_states shape: {processed['action_joint_states'].shape}")
-            print(f"[Post] action_ee_poses shape: {processed['action_ee_poses'].shape}")
+            # print(f"[Post] Raw samples: {len(raw_samples)}")
+            # print(f"[Post] joint_states shape: {processed['joint_states'].shape}")
+            # print(f"[Post] ee_poses shape: {processed['ee_poses'].shape}")
+            # print(f"[Post] frames_full shape: {processed['frames_full'].shape}")
+            # print(f"[Post] frames_224 shape: {processed['frames_224'].shape}")
+            # print(f"[Post] action_joint_states shape: {processed['action_joint_states'].shape}")
+            # print(f"[Post] action_ee_poses shape: {processed['action_ee_poses'].shape}")
 
             if processed["joint_states"].size > 0:
                 print("[Post] First joint state:", np.round(processed["joint_states"][0], 2))
@@ -155,7 +157,20 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         except Exception as e:
             print(f"[Cleanup] ✗ Post-processing error: {e}")
 
-        # 5. Close camera (last step, after all threads are stopped)
+        # 5. Clean up detector before camera (avoid dangling pointers)
+        if detector is not None:
+            try:
+                detector = None
+            except Exception as e:
+                print(f"[Cleanup] ✗ Detector cleanup error: {e}")
+
+        # 6. Close OpenCV windows
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+
+        # 7. Close camera (last step, after all threads are stopped)
         if zed is not None:
             try:
                 print("[Cleanup] Closing ZedCamera...")
@@ -165,6 +180,9 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
                 print(f"[Cleanup] ✗ ZedCamera close error: {e}")
         
         print("[Cleanup] ✓ Cleanup complete")
+        
+        # Force garbage collection before returning
+        gc.collect()
     return processed
 
 
@@ -180,16 +198,32 @@ if __name__ == "__main__":
 
     start = time.time()
     processed = run(tag_ids=args.tag_ids, task_name=args.task_name)
-    
-    # Save to HDF5 if data was successfully collected
+    print("Episode streaming complete.")
+    # Ask for user approval and save/delete accordingly
     if processed is not None and processed["joint_states"].size > 0:
-        print("saving episode")
-        # success = bool(input("Was the episode successful? (y/n): ").lower() == 'y')
-        save_to_hdf5(
-            processed=processed,
-            output_dir=args.demo_dir,
-            task_name=args.task_name,
-            success=True
-        )
+        approve = input("Do you approve of this episode? (y/n): ").lower() == 'y'
+        
+        if approve:
+            print("saving episode")
+            save_to_hdf5(
+                processed=processed,
+                output_dir=args.demo_dir,
+                task_name=args.task_name,
+                success=True
+            )
+        else:
+            # Delete the latest video file
+            video_files = glob.glob(os.path.join("demonstrations", "*.mp4"))
+            if video_files:
+                latest_video = max(video_files, key=os.path.getctime)
+                try:
+                    os.remove(latest_video)
+                    print(f"Deleted video: {latest_video}")
+                except Exception as e:
+                    print(f"Failed to delete video: {e}")
+            print("Episode discarded (HDF5 not saved)")
+    
+    # Force garbage collection to clean up C++ objects before exit
+    gc.collect()
     
     print("Total time:", round(time.time() - start, 2), "s")

@@ -8,8 +8,6 @@ from scipy.spatial.transform import Rotation
 from utils.detector import BracketDetector
 from typing import List
 
-SPEED = 100  # conservative speed for precision work
-
 ## TODO: C CLIP - IF TAG - EE POSE = 180 --> TREAT IT LIKE 0 (ALIGNED)
 
 class ActionPlanner:
@@ -20,7 +18,7 @@ class ActionPlanner:
         self.arm.set_tcp_offset([0, 0, presets.GRIPPER_LENGTH, 0, 0, 0])
         self.arm.set_mode(0)
         self.arm.set_state(0)
-        self.arm.move_gohome(speed=100, wait=True)
+        self.arm.move_gohome(speed=presets.SPEED, wait=True)
         self.t_robot_cam = np.linalg.inv(camera_pose)
         self.config = {
             "y_clip": {"X_OFFSET": -42.0, "Y_OFFSET": 42.0, "Z_SAFE": 60.0},
@@ -36,9 +34,9 @@ class ActionPlanner:
         self.arm.set_position(
             x=safe[0], y=safe[1], z=safe[2]+20, 
             roll=safe[3], pitch=safe[4], yaw=safe[5],
-            is_radian=False, speed=100, wait=True
+            is_radian=False, speed=presets.SPEED, wait=True
         )
-        self.arm.move_gohome(speed=100, wait=True)
+        self.arm.move_gohome(speed=presets.SPEED, wait=True)
         self.arm.close_lite6_gripper(sync=True)
         self.arm.set_pause_time(sltime=0.2, wait=True)
         self.arm.stop_lite6_gripper(sync=True)
@@ -62,7 +60,7 @@ class ActionPlanner:
         x_m, y_m, z_m, _ = pose[:, 3].flatten()
         return {"x": x_m * 1000, "y": y_m * 1000, "z": z_m * 1000,
             "roll": roll, "pitch": pitch, "yaw": yaw,
-            "is_radian": False, "speed": SPEED, "wait": True,
+            "is_radian": False, "speed": presets.SPEED, "wait": True,
         }
 
     def execute_plan(self, plan: List[dict]) -> None:

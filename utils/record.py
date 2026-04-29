@@ -4,7 +4,10 @@ import cv2
 import h5py
 from utils.zed_camera import ZedCamera
 from pathlib import Path
+from utils import logger
+import logging
 
+logger = logging.getLogger("VLA")
 
 def _to_rgb(images: np.ndarray) -> np.ndarray:
     """Drop alpha channel from BGRA (ZED camera outputs BGRA natively, which OpenVLA expects as RGB).
@@ -98,7 +101,7 @@ def position_printer(
             code1, pose = arm.get_position(is_radian=True)
             code2, state = arm.get_servo_angle(is_radian=True)
             frame = zed.image
-            # print(f"[Position] {pose} | [State] {state} | [Frame Shape] {frame.shape if frame is not None else None}")
+            logger.debug(f"[Position] {pose} | [State] {state} | [Frame Shape] {frame.shape if frame is not None else None}")
             if code1 == 0 and code2 == 0 and frame is not None:
                 gripper_state = planner.get_gripper_state() if planner is not None else 0.0
                 pose_h = np.append(np.asarray(pose, dtype=np.float32), gripper_state)
@@ -111,9 +114,9 @@ def position_printer(
                     }
                 )
             else:
-                print(f"[Position] get_position failed with code={code1, code2, frame is not None}")
+                logger.warning(f"[Position] get_position failed with code={code1, code2, frame is not None}")
         except Exception as exc:
-            print(f"[Position] error: {exc}")
+            logger.error(f"[Position] error: {exc}")
 
         elapsed = time.time() - loop_start
         sleep_time = max(0.0, period - elapsed)
@@ -185,8 +188,8 @@ def save_to_hdf5(processed: dict, output_dir: str = "./demonstrations",
         f.create_dataset("is_terminal", data=is_terminal)
         f.create_dataset("rewards", data=rewards)
     
-    print(f"[Save] Episode saved to {fname}")
-    print(f"[Save] Episode {episode_idx:04d} | Steps: {T} | Success: {success}")
+    logger.info(f"[Save] Episode saved to {fname}")
+    logger.info(f"[Save] Episode {episode_idx:04d} | Steps: {T} | Success: {success}")
     return str(fname)
 
 
@@ -295,7 +298,7 @@ def video_writer(
     
     last_frame_count = 0
     
-    print(f"[VideoWriter] Starting video writer (target: {fps} fps, output: {video_path})")
+    logger.info(f"Starting video writer (target: {fps} fps, output: {video_path})")
     
     try:
         while not stop_event.is_set():
@@ -318,7 +321,7 @@ def video_writer(
                     )
                     if not writer.isOpened():
                         raise RuntimeError(f"Failed to open video writer for {video_path}")
-                    print(f"[VideoWriter] Initialized: {frame_width}x{frame_height} @ {fps} fps")
+                    logger.info(f"Initialized: {frame_width}x{frame_height} @ {fps} fps")
                 
                 # Write the frame (convert BGRA to BGR if needed)
                 if latest_frame.shape[2] == 4:
@@ -341,10 +344,10 @@ def video_writer(
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
                 writer.write(frame.astype(np.uint8))
         
-        print(f"[VideoWriter] ✓ Wrote {len(raw_samples)} frames to {video_path}")
+        logger.info(f"Wrote {len(raw_samples)} frames to {video_path}")
         
     except Exception as e:
-        print(f"[VideoWriter] ✗ Error: {e}")
+        logger.error(f"Error: {e}")
         return None
     
     finally:

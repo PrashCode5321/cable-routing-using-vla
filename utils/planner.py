@@ -7,7 +7,10 @@ from utils.vis_utils import draw_pose_axes
 from scipy.spatial.transform import Rotation
 from utils.detector import BracketDetector
 from typing import List
+from utils import logger
+import logging
 
+logger = logging.getLogger("VLA")
 ## TODO: C CLIP - IF TAG - EE POSE = 180 --> TREAT IT LIKE 0 (ALIGNED)
 
 class ActionPlanner:
@@ -27,7 +30,7 @@ class ActionPlanner:
             "c_clip": {"X_OFFSET": 42.0, "Y_OFFSET": 42.0, "Z_SAFE": 10.0},
             "round_clip": {"RADIUS": 45.0, "Z_SAFE": 60.0}
         }
-        print("robot initialized")
+        logger.info("robot initialized")
 
     def set_gripper_state(self, state: float) -> None:
         """Thread-safe setter for gripper state."""
@@ -56,6 +59,7 @@ class ActionPlanner:
         self.arm.stop_lite6_gripper(sync=True)
         time.sleep(1)
         self.arm.disconnect()
+        logger.info("robot shutdown complete")
     
     def wrap(self, angle: float) -> float:
         return (angle + 180.0) % 360.0 - 180.0
@@ -80,14 +84,14 @@ class ActionPlanner:
     def execute_plan(self, plan: List[dict]) -> None:
         for step in plan:
             if step.get("log"):
-                print(step["log"])
+                logger.debug(step["log"])
                 del step["log"]
-            print(step)
+            logger.debug(step)
             ret = self.arm.set_position(**step)
             if ret != 0:
                 raise RuntimeError("Motion failed")
         self.arm.set_pause_time(sltime=0.5, wait=True)
-        print("Motion Completed")
+        logger.info("Motion Completed")
 
     def r_clip_plan(self, clip_pose: np.ndarray) -> List[dict]:
         round_clip_config = self.config["round_clip"]
@@ -210,13 +214,14 @@ def main():
         cv2.destroyAllWindows()
 
         if key != ord("k"):
-            print("Aborted by user.")
+            logger.info("Aborted by user.")
             return
 
         motion_plan = planner.y_clip_plan(clip_pose=t_cam_clip)
         planner.arm.close_lite6_gripper(sync=True)
         planner.execute_plan(motion_plan)
     except Exception as e:
+        logger.error(f"Error occurred: {e}")
         raise e
     finally:
         planner.shutdown()
@@ -226,4 +231,4 @@ def main():
 if __name__ == "__main__":
     start = time.time()
     main()
-    print("Total time:", np.round(time.time() - start, 2), "s")
+    logger.info("Total time:", np.round(time.time() - start, 2), "s")

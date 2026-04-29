@@ -1,5 +1,8 @@
 import numpy, time, threading
 import pyzed.sl as sl
+from utils import logger
+import logging
+logger = logging.getLogger("VLA")
 
 class ZedCamera:
 
@@ -16,7 +19,7 @@ class ZedCamera:
         # Open ZED Camera
         err = self._zed.open(init_params)
         if err > sl.ERROR_CODE.SUCCESS:
-            print("Camera Open : "+repr(err)+". Exit program.")
+            logger.error("Camera Open : "+repr(err)+". Exit program.")
             exit(-1)
 
         # Warmup ZED Camera

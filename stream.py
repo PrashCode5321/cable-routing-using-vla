@@ -3,7 +3,7 @@ import glob
 import gc
 
 # Prevent Qt font warnings from OpenCV HighGUI by pointing to system fonts.
-os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype/dejavu")
+os.environ["QT_QPA_FONTDIR"] = "/usr/share/fonts/truetype/dejavu"
 
 import argparse
 import threading
@@ -16,7 +16,10 @@ from utils.vis_utils import draw_pose_axes
 from utils.planner import ActionPlanner
 from utils.record import position_printer, save_to_hdf5, post_process_samples, video_writer
 from typing import List
+from utils import logger
+import logging
 
+logger = logging.getLogger("VLA")
 
 def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_name: str = "clip_pickup", fps: int = 5) -> dict:
     zed = None
@@ -32,7 +35,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
 
     try:
         zed = ZedCamera()
-        print("[Init] ✓ ZedCamera created")
+        logger.info("ZedCamera created")
         
         cv_image = zed.image
         detector = BracketDetector(
@@ -42,7 +45,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
 
         planner = ActionPlanner(camera_pose=detector.camera_pose)
 
-        print("Scanned the workspace")
+        logger.info("Scanned the workspace")
         results = detector.identify_april_tag_ids()
         if not results:
             raise RuntimeError(f"No objects found")
@@ -58,7 +61,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         cv2.destroyAllWindows()
 
         if key != ord("k"):
-            print("Aborted by user.")
+            logger.warning("Aborted by user.")
             return None
 
         # Start position monitor thread (10 Hz)
@@ -68,7 +71,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
             daemon=True,
         )
         monitor_thread.start()
-        print("Capturing raw synced data (poses, states, frames) in memory.")
+        logger.info("Capturing raw synced data (poses, states, frames) in memory.")
 
         # Start video writer thread (writes frames to MP4 in parallel)
         video_thread = threading.Thread(
@@ -77,7 +80,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
             daemon=True,
         )
         video_thread.start()
-        print("Recording video to demonstrations/episode_XXXX.mp4")
+        logger.info("Recording video to demonstrations/episode_XXXX.mp4")
         time.sleep(0.5)
 
         plan = []
@@ -86,11 +89,11 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         for result in results:
             tag_id, t_cam_clip = result
             if tag_id not in tag_ids:
-                print(f"Skipping tag ID {tag_id} as it's not in the specified list {tag_ids}")
+                logger.info(f"Skipping tag ID {tag_id} as it's not in the specified list {tag_ids}")
                 continue
         
 
-            print("Starting plan execution...")
+            logger.info("Starting plan execution...")
             if tag_id % 3 == 0:
                 plan.extend(planner.y_clip_plan(clip_pose=t_cam_clip))
             elif tag_id % 4 == 0:
@@ -107,7 +110,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
 
     finally:
         # 1. Stop threads FIRST (before closing resources)
-        print("[Cleanup] Stopping threads...")
+        logger.info("[Cleanup] Stopping threads...")
         stop_event.set()
         
         # Give threads time to notice the stop event
@@ -117,21 +120,21 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
             try:
                 monitor_thread.join(timeout=5.0)
                 if monitor_thread.is_alive():
-                    print("[Cleanup] ⚠️  Position monitor did not stop gracefully")
+                    logger.warning("[Cleanup] Position monitor did not stop gracefully")
                 else:
-                    print("[Cleanup] ✓ Position monitor stopped")
+                    logger.info("[Cleanup] Position monitor stopped")
             except Exception as e:
-                print(f"[Cleanup] ✗ Monitor join error: {e}")
+                logger.error(f"[Cleanup] Monitor join error: {e}")
         
         if video_thread is not None:
             try:
                 video_thread.join(timeout=5.0)
                 if video_thread.is_alive():
-                    print("[Cleanup] ⚠️  Video writer did not stop gracefully")
+                    logger.warning("[Cleanup] Video writer did not stop gracefully")
                 else:
-                    print("[Cleanup] ✓ Video writer stopped")
+                    logger.info("[Cleanup] Video writer stopped")
             except Exception as e:
-                print(f"[Cleanup] ✗ Video thread join error: {e}")
+                logger.error(f"[Cleanup] Video thread join error: {e}")
         
         # Critical: Wait longer to ensure threads fully exit and release C++ resources
         time.sleep(1.0)
@@ -139,11 +142,11 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         # 2. Close camera BEFORE shutting down planner
         if zed is not None:
             try:
-                print("[Cleanup] Closing ZedCamera...")
+                logger.info("[Cleanup] Closing ZedCamera...")
                 zed.close()
-                print("[Cleanup] ✓ ZedCamera closed")
+                logger.info("[Cleanup] ZedCamera closed")
             except Exception as e:
-                print(f"[Cleanup] ✗ ZedCamera close error: {e}")
+                logger.error(f"[Cleanup] ZedCamera close error: {e}")
             finally:
                 zed = None
 
@@ -152,11 +155,11 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         # 3. Shutdown planner (stop motion)
         if planner is not None:
             try:
-                print("[Cleanup] Shutting down planner...")
+                logger.info("[Cleanup] Shutting down planner...")
                 planner.shutdown()
-                print("[Cleanup] ✓ Planner shutdown")
+                logger.info("[Cleanup] Planner shutdown")
             except Exception as e:
-                print(f"[Cleanup] ✗ Planner shutdown error: {e}")
+                logger.error(f"[Cleanup] Planner shutdown error: {e}")
             finally:
                 planner = None
 
@@ -164,26 +167,50 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         if plan_completed and stream_until is not None:
             remaining = stream_until - time.time()
             if remaining > 0:
-                print(f"[Cleanup] Continuing stream for {remaining:.1f}s after plan completion...")
+                logger.info(f"[Cleanup] Continuing stream for {remaining:.1f}s after plan completion...")
                 time.sleep(max(0, remaining))
 
         # 5. Process data
         try:
-            print("[Cleanup] Post-processing samples...")
+            logger.info("[Cleanup] Post-processing samples...")
             processed = post_process_samples(raw_samples, task_name=task_name)
 
             if processed["joint_states"].size > 0:
-                print("[Post] First joint state:", np.round(processed["joint_states"][0], 2))
-                print("[Post] First EE pose (translation in m, rotation in rad, gripper):", np.round(processed["ee_poses"][0], 4))
+                logger.info(f"[Post] First joint state: {np.round(processed['joint_states'][0], 2)}")
+                logger.info(f"[Post] First EE pose (translation in m, rotation in rad, gripper): {np.round(processed['ee_poses'][0], 4)}")
         except Exception as e:
-            print(f"[Cleanup] ✗ Post-processing error: {e}")
+            logger.error(f"[Cleanup] Post-processing error: {e}")
 
+        # Ask for user approval and save/delete accordingly
+        if processed is not None and processed["joint_states"].size > 0:
+            approve = input("Do you approve of this episode? (y/n): ").lower() == 'y'
+            
+            if approve:
+                logger.info("saving episode")
+                save_to_hdf5(
+                    processed=processed,
+                    output_dir=args.demo_dir,
+                    task_name=args.task_name,
+                    success=True
+                )
+            else:
+                # Delete the latest video file
+                video_files = glob.glob(os.path.join("demonstrations", "*.mp4"))
+                if video_files:
+                    latest_video = max(video_files, key=os.path.getctime)
+                    try:
+                        os.remove(latest_video)
+                        logger.warning(f"Deleted video: {latest_video}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete video: {e}")
+                logger.info("Episode discarded (HDF5 not saved)")
+    
         # 6. Clean up raw samples and detector
         try:
             raw_samples.clear()
             detector = None
         except Exception as e:
-            print(f"[Cleanup] ✗ Cleanup error: {e}")
+            logger.error(f"[Cleanup] ✗ Cleanup error: {e}")
 
         # 7. Close OpenCV windows
         try:
@@ -191,7 +218,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         except Exception:
             pass
         
-        print("[Cleanup] ✓ Cleanup complete")
+        logger.info("[Cleanup] ✓ Cleanup complete")
         
         # Final garbage collection
         gc.collect()
@@ -211,32 +238,9 @@ if __name__ == "__main__":
 
     start = time.time()
     processed = run(tag_ids=args.tag_ids, task_name=args.task_name, fps=args.fps)
-    print("Episode streaming complete.")
-    # Ask for user approval and save/delete accordingly
-    if processed is not None and processed["joint_states"].size > 0:
-        approve = input("Do you approve of this episode? (y/n): ").lower() == 'y'
-        
-        if approve:
-            print("saving episode")
-            save_to_hdf5(
-                processed=processed,
-                output_dir=args.demo_dir,
-                task_name=args.task_name,
-                success=True
-            )
-        else:
-            # Delete the latest video file
-            video_files = glob.glob(os.path.join("demonstrations", "*.mp4"))
-            if video_files:
-                latest_video = max(video_files, key=os.path.getctime)
-                try:
-                    os.remove(latest_video)
-                    print(f"Deleted video: {latest_video}")
-                except Exception as e:
-                    print(f"Failed to delete video: {e}")
-            print("Episode discarded (HDF5 not saved)")
+    logger.info("Episode streaming complete.")
     
     # Force garbage collection to clean up C++ objects before exit
     gc.collect()
     
-    print("Total time:", round(time.time() - start, 2), "s")
+    logger.info(f"Total time: {round(time.time() - start, 2)} s")

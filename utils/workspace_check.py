@@ -1,10 +1,12 @@
 import cv2, numpy
 from pupil_apriltags import Detector
-
 from utils.vis_utils import draw_pose_axes
 from utils.zed_camera import ZedCamera
+from utils.logger import logger
+import logging
+from utils import presets
 
-TAG_SIZE = 0.08
+logger = logging.getLogger("VLA")
 
 # top-left, top-right, bottom-left, bottom-right
 TAG_CENTER_COORDINATES = [[0.38, 0.4],
@@ -46,8 +48,8 @@ def get_pnp_pairs(tags):
 
         # Bottom left corner
         wp = numpy.zeros(3)
-        wp[0] = tag_center[0] - (TAG_SIZE / 2)
-        wp[1] = tag_center[1] + (TAG_SIZE / 2)
+        wp[0] = tag_center[0] - (presets.TAG_SIZE / 2)
+        wp[1] = tag_center[1] + (presets.TAG_SIZE / 2)
 
         ip = tag.corners[0]
 
@@ -56,8 +58,8 @@ def get_pnp_pairs(tags):
 
         # Bottom right corner
         wp = numpy.zeros(3)
-        wp[0] = tag_center[0] - (TAG_SIZE / 2)
-        wp[1] = tag_center[1] - (TAG_SIZE / 2)
+        wp[0] = tag_center[0] - (presets.TAG_SIZE / 2)
+        wp[1] = tag_center[1] - (presets.TAG_SIZE / 2)
 
         ip = tag.corners[1]
 
@@ -66,8 +68,8 @@ def get_pnp_pairs(tags):
 
         # Top right corner
         wp = numpy.zeros(3)
-        wp[0] = tag_center[0] + (TAG_SIZE / 2)
-        wp[1] = tag_center[1] - (TAG_SIZE / 2)
+        wp[0] = tag_center[0] + (presets.TAG_SIZE / 2)
+        wp[1] = tag_center[1] - (presets.TAG_SIZE / 2)
 
         ip = tag.corners[2]
 
@@ -76,8 +78,8 @@ def get_pnp_pairs(tags):
 
         # Top left corner
         wp = numpy.zeros(3)
-        wp[0] = tag_center[0] + (TAG_SIZE / 2)
-        wp[1] = tag_center[1] + (TAG_SIZE / 2)
+        wp[0] = tag_center[0] + (presets.TAG_SIZE / 2)
+        wp[1] = tag_center[1] + (presets.TAG_SIZE / 2)
 
         ip = tag.corners[3]
 
@@ -116,16 +118,16 @@ def get_transform_camera_robot(observation, camera_intrinsic):
     if len(observation.shape) > 2:
         observation = cv2.cvtColor(observation, cv2.COLOR_BGRA2GRAY)
     tags = detector.detect(observation, estimate_tag_pose=False)
-    print(f'Number of tags found: {len(tags)}')
+    logger.info(f'Number of tags found: {len(tags)}')
     world_points, image_points = get_pnp_pairs(tags)
     if world_points.shape[0] < 4:
-        print(f'Insufficient valid tag corners found.')
+        logger.warning(f'Insufficient valid tag corners found.')
         return None
 
     # Get Transformation
     success, rotation_vec, translation = cv2.solvePnP(world_points, image_points, camera_intrinsic, None)
     if success is not True:
-        print('PnP Calculation Failed.')
+        logger.error('PnP Calculation Failed.')
         return None
     rotation_mat, _ = cv2.Rodrigues(rotation_vec)
     transform_mat = numpy.eye(4)
@@ -150,7 +152,7 @@ def main():
             return
         
         # Visualization
-        draw_pose_axes(cv_image, camera_intrinsic, t_cam_robot, size=TAG_SIZE)
+        draw_pose_axes(cv_image, camera_intrinsic, t_cam_robot, size=presets.TAG_SIZE)
         cv2.namedWindow('Verifying World Origin', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('Verifying World Origin', 1280, 720)
         cv2.imshow('Verifying World Origin', cv_image)

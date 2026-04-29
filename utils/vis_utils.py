@@ -1,4 +1,8 @@
 import cv2, numpy, open3d
+from utils import logger
+import logging
+
+logger = logging.getLogger("VLA")
 
 def draw_pose_axes(image, camera_intrinsic, pose, size=0.1):
     rvec, _ = cv2.Rodrigues(pose[:3,:3])
@@ -51,7 +55,7 @@ def get_workspace_mask(bgr_image):
     # Find the largest contour — that's the poster
     contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        print("[workspace] No white region found — using full image.")
+        logger.warning("[workspace] No white region found — using full image.")
         return numpy.full(bgr_image.shape[:2], 255, dtype=numpy.uint8)
 
     largest = max(contours, key=cv2.contourArea)

@@ -112,7 +112,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         
         if monitor_thread is not None:
             try:
-                monitor_thread.join(timeout=2.0)
+                monitor_thread.join(timeout=3.0)
                 print("[Cleanup] ✓ Position monitor stopped")
             except Exception as e:
                 print(f"[Cleanup] ✗ Monitor join error: {e}")
@@ -123,55 +123,11 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
                 print("[Cleanup] ✓ Video writer stopped")
             except Exception as e:
                 print(f"[Cleanup] ✗ Video thread join error: {e}")
+        
+        # Wait to ensure threads are fully dead before touching shared resources
+        time.sleep(0.5)
 
-        # 2. Shutdown planner (stop motion)
-        if planner is not None:
-            try:
-                print("[Cleanup] Shutting down planner...")
-                planner.shutdown()
-                print("[Cleanup] ✓ Planner shutdown")
-            except Exception as e:
-                print(f"[Cleanup] ✗ Planner shutdown error: {e}")
-
-        # 3. Wait for remaining stream time
-        if plan_completed and stream_until is not None:
-            remaining = stream_until - time.time()
-            if remaining > 0:
-                print(f"[Cleanup] Continuing stream for {remaining:.1f}s after plan completion...")
-                stop_event.wait(remaining)
-
-        # 4. Process data
-        try:
-            print("[Cleanup] Post-processing samples...")
-            processed = post_process_samples(raw_samples, task_name=task_name)
-            # print(f"[Post] Raw samples: {len(raw_samples)}")
-            # print(f"[Post] joint_states shape: {processed['joint_states'].shape}")
-            # print(f"[Post] ee_poses shape: {processed['ee_poses'].shape}")
-            # print(f"[Post] frames_full shape: {processed['frames_full'].shape}")
-            # print(f"[Post] frames_224 shape: {processed['frames_224'].shape}")
-            # print(f"[Post] action_joint_states shape: {processed['action_joint_states'].shape}")
-            # print(f"[Post] action_ee_poses shape: {processed['action_ee_poses'].shape}")
-
-            if processed["joint_states"].size > 0:
-                print("[Post] First joint state:", np.round(processed["joint_states"][0], 2))
-                print("[Post] First EE pose (translation in m, rotation in rad, gripper):", np.round(processed["ee_poses"][0], 4))
-        except Exception as e:
-            print(f"[Cleanup] ✗ Post-processing error: {e}")
-
-        # 5. Clean up detector before camera (avoid dangling pointers)
-        if detector is not None:
-            try:
-                detector = None
-            except Exception as e:
-                print(f"[Cleanup] ✗ Detector cleanup error: {e}")
-
-        # 6. Close OpenCV windows
-        try:
-            cv2.destroyAllWindows()
-        except Exception:
-            pass
-
-        # 7. Close camera (last step, after all threads are stopped)
+        # 2. Close camera BEFORE shutting down planner (threads may reference it)
         if zed is not None:
             try:
                 print("[Cleanup] Closing ZedCamera...")
@@ -179,6 +135,48 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
                 print("[Cleanup] ✓ ZedCamera closed")
             except Exception as e:
                 print(f"[Cleanup] ✗ ZedCamera close error: {e}")
+            zed = None
+
+        # 3. Shutdown planner (stop motion)
+        if planner is not None:
+            try:
+                print("[Cleanup] Shutting down planner...")
+                planner.shutdown()
+                print("[Cleanup] ✓ Planner shutdown")
+            except Exception as e:
+                print(f"[Cleanup] ✗ Planner shutdown error: {e}")
+            planner = None
+
+        # 4. Wait for remaining stream time
+        if plan_completed and stream_until is not None:
+            remaining = stream_until - time.time()
+            if remaining > 0:
+                print(f"[Cleanup] Continuing stream for {remaining:.1f}s after plan completion...")
+                time.sleep(max(0, remaining))
+
+        # 5. Process data
+        try:
+            print("[Cleanup] Post-processing samples...")
+            processed = post_process_samples(raw_samples, task_name=task_name)
+
+            if processed["joint_states"].size > 0:
+                print("[Post] First joint state:", np.round(processed["joint_states"][0], 2))
+                print("[Post] First EE pose (translation in m, rotation in rad, gripper):", np.round(processed["ee_poses"][0], 4))
+        except Exception as e:
+            print(f"[Cleanup] ✗ Post-processing error: {e}")
+
+        # 6. Clean up detector
+        if detector is not None:
+            try:
+                detector = None
+            except Exception as e:
+                print(f"[Cleanup] ✗ Detector cleanup error: {e}")
+
+        # 7. Close OpenCV windows
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
         
         print("[Cleanup] ✓ Cleanup complete")
         

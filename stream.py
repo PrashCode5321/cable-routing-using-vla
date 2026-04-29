@@ -106,23 +106,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         stream_until = time.time() + max(0.0, post_plan_stream_seconds)
 
     finally:
-        # 1. Shutdown planner (stop motion)
-        if planner is not None:
-            try:
-                print("[Cleanup] Shutting down planner...")
-                planner.shutdown()
-                print("[Cleanup] ✓ Planner shutdown")
-            except Exception as e:
-                print(f"[Cleanup] ✗ Planner shutdown error: {e}")
-
-        # 2. Wait for remaining stream time
-        if plan_completed and stream_until is not None:
-            remaining = stream_until - time.time()
-            if remaining > 0:
-                print(f"[Cleanup] Continuing stream for {remaining:.1f}s after plan completion...")
-                stop_event.wait(remaining)
-
-        # 3. Stop threads and wait for them to finish
+        # 1. Stop threads FIRST (before closing resources)
         print("[Cleanup] Stopping threads...")
         stop_event.set()
         
@@ -139,8 +123,24 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
                 print("[Cleanup] ✓ Video writer stopped")
             except Exception as e:
                 print(f"[Cleanup] ✗ Video thread join error: {e}")
-        
-        # 4. Process data (before closing camera, in case it's still needed)
+
+        # 2. Shutdown planner (stop motion)
+        if planner is not None:
+            try:
+                print("[Cleanup] Shutting down planner...")
+                planner.shutdown()
+                print("[Cleanup] ✓ Planner shutdown")
+            except Exception as e:
+                print(f"[Cleanup] ✗ Planner shutdown error: {e}")
+
+        # 3. Wait for remaining stream time
+        if plan_completed and stream_until is not None:
+            remaining = stream_until - time.time()
+            if remaining > 0:
+                print(f"[Cleanup] Continuing stream for {remaining:.1f}s after plan completion...")
+                stop_event.wait(remaining)
+
+        # 4. Process data
         try:
             print("[Cleanup] Post-processing samples...")
             processed = post_process_samples(raw_samples, task_name=task_name)

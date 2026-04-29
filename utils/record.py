@@ -148,8 +148,8 @@ def save_to_hdf5(processed: dict, output_dir: str = "./demonstrations",
         obs = f.create_group("observations")
         obs.create_dataset("images", data=processed["images_rgb"], 
                           compression="gzip", compression_opts=4)
-        obs.create_dataset("images_full", data=processed["frames_full"],
-                          compression="gzip", compression_opts=4)
+        # obs.create_dataset("images_full", data=processed["frames_full"],
+        #                   compression="gzip", compression_opts=4)
         obs.create_dataset("joint_states", data=processed["joint_states"])
         obs.create_dataset("ee_poses", data=processed["ee_poses"])
         

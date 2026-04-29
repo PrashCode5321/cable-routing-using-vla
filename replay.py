@@ -103,7 +103,8 @@ def replay_episode(filepath: str, speed: int = 80, dry_run: bool = False) -> Non
             cmd = ee_pose_to_command(target_pose_mm)
             
             # Gripper control
-            if frame[6] < 0.5:
+            print("gripper state:", frame[6])
+            if frame[6] > 0.5:
                 arm.open_lite6_gripper(sync=True)
             else:
                 arm.close_lite6_gripper(sync=True)

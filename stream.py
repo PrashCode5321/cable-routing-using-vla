@@ -206,10 +206,11 @@ if __name__ == "__main__":
                        help="Language instruction for the task")
     parser.add_argument("--demo-dir", type=str, default="./episodes",
                        help="Directory to save demonstration episodes (HDF5 files)")
+    parser.add_argument("--fps", type=int, default=10, help="Frames per second for video recording and data capture")
     args = parser.parse_args()
 
     start = time.time()
-    processed = run(tag_ids=args.tag_ids, task_name=args.task_name)
+    processed = run(tag_ids=args.tag_ids, task_name=args.task_name, fps=args.fps)
     print("Episode streaming complete.")
     # Ask for user approval and save/delete accordingly
     if processed is not None and processed["joint_states"].size > 0:

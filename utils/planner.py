@@ -23,7 +23,7 @@ class ActionPlanner:
         self._gripper_state_lock = threading.Lock()
         self._gripper_state = 0.0  # 0=closed, 1=open
         self.config = {
-            "y_clip": {"X_OFFSET": -42.0, "Y_OFFSET": 42.0, "Z_SAFE": 60.0},
+            "y_clip": {"X_OFFSET": -42.0, "Y_OFFSET": 38.0, "Z_SAFE": 65.0},
             "c_clip": {"X_OFFSET": 42.0, "Y_OFFSET": 42.0, "Z_SAFE": 10.0},
             "round_clip": {"RADIUS": 45.0, "Z_SAFE": 60.0}
         }

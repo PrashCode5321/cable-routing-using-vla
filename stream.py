@@ -64,7 +64,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         # Start position monitor thread (10 Hz)
         monitor_thread = threading.Thread(
             target=position_printer,
-            args=(planner.arm, zed, stop_event, raw_samples, float(fps)),
+            args=(planner.arm, zed, stop_event, raw_samples, float(fps), planner),
             daemon=True,
         )
         monitor_thread.start()
@@ -82,6 +82,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
 
         plan = []
         planner.arm.close_lite6_gripper(sync=True)
+        planner.set_gripper_state(0.0)
         for result in results:
             tag_id, t_cam_clip = result
             if tag_id not in tag_ids:

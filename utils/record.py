@@ -82,6 +82,7 @@ def position_printer(
     stop_event: threading.Event,
     raw_samples: list,
     hz: float = 15.0,
+    planner=None,
 ) -> None:
     period = 1.0 / hz
     while not stop_event.is_set():
@@ -99,7 +100,8 @@ def position_printer(
             frame = zed.image
             # print(f"[Position] {pose} | [State] {state} | [Frame Shape] {frame.shape if frame is not None else None}")
             if code1 == 0 and code2 == 0 and frame is not None:
-                pose_h = np.append(np.asarray(pose, dtype=np.float32), 1.0)
+                gripper_state = planner.get_gripper_state() if planner is not None else 0.0
+                pose_h = np.append(np.asarray(pose, dtype=np.float32), gripper_state)
                 raw_samples.append(
                     {
                         "timestamp": timestamp,

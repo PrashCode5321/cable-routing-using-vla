@@ -1,5 +1,5 @@
 import numpy as np
-import cv2, time
+import cv2, time, threading
 from xarm.wrapper import XArmAPI
 from utils import presets
 from utils.zed_camera import ZedCamera
@@ -20,6 +20,8 @@ class ActionPlanner:
         self.arm.set_state(0)
         self.arm.move_gohome(speed=presets.SPEED, wait=True)
         self.t_robot_cam = np.linalg.inv(camera_pose)
+        self._gripper_state_lock = threading.Lock()
+        self._gripper_state = 0.0  # 0=closed, 1=open
         self.config = {
             "y_clip": {"X_OFFSET": -42.0, "Y_OFFSET": 42.0, "Z_SAFE": 60.0},
             "c_clip": {"X_OFFSET": 42.0, "Y_OFFSET": 42.0, "Z_SAFE": 10.0},
@@ -27,8 +29,19 @@ class ActionPlanner:
         }
         print("robot initialized")
 
+    def set_gripper_state(self, state: float) -> None:
+        """Thread-safe setter for gripper state."""
+        with self._gripper_state_lock:
+            self._gripper_state = state
+
+    def get_gripper_state(self) -> float:
+        """Thread-safe getter for gripper state."""
+        with self._gripper_state_lock:
+            return self._gripper_state
+
     def shutdown(self):
         self.arm.open_lite6_gripper(sync=True)
+        self.set_gripper_state(1.0)
         self.arm.set_pause_time(sltime=0.2, wait=True)
         _, safe = self.arm.get_position(is_radian=False)
         self.arm.set_position(
@@ -38,6 +51,7 @@ class ActionPlanner:
         )
         self.arm.move_gohome(speed=presets.SPEED, wait=True)
         self.arm.close_lite6_gripper(sync=True)
+        self.set_gripper_state(0.0)
         self.arm.set_pause_time(sltime=0.2, wait=True)
         self.arm.stop_lite6_gripper(sync=True)
         time.sleep(1)

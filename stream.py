@@ -110,24 +110,33 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         print("[Cleanup] Stopping threads...")
         stop_event.set()
         
+        # Give threads time to notice the stop event
+        time.sleep(0.2)
+        
         if monitor_thread is not None:
             try:
-                monitor_thread.join(timeout=3.0)
-                print("[Cleanup] ✓ Position monitor stopped")
+                monitor_thread.join(timeout=5.0)
+                if monitor_thread.is_alive():
+                    print("[Cleanup] ⚠️  Position monitor did not stop gracefully")
+                else:
+                    print("[Cleanup] ✓ Position monitor stopped")
             except Exception as e:
                 print(f"[Cleanup] ✗ Monitor join error: {e}")
         
         if video_thread is not None:
             try:
-                video_thread.join(timeout=3.0)
-                print("[Cleanup] ✓ Video writer stopped")
+                video_thread.join(timeout=5.0)
+                if video_thread.is_alive():
+                    print("[Cleanup] ⚠️  Video writer did not stop gracefully")
+                else:
+                    print("[Cleanup] ✓ Video writer stopped")
             except Exception as e:
                 print(f"[Cleanup] ✗ Video thread join error: {e}")
         
-        # Wait to ensure threads are fully dead before touching shared resources
-        time.sleep(0.5)
+        # Critical: Wait longer to ensure threads fully exit and release C++ resources
+        time.sleep(1.0)
 
-        # 2. Close camera BEFORE shutting down planner (threads may reference it)
+        # 2. Close camera BEFORE shutting down planner
         if zed is not None:
             try:
                 print("[Cleanup] Closing ZedCamera...")
@@ -135,7 +144,10 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
                 print("[Cleanup] ✓ ZedCamera closed")
             except Exception as e:
                 print(f"[Cleanup] ✗ ZedCamera close error: {e}")
-            zed = None
+            finally:
+                zed = None
+
+        time.sleep(0.2)
 
         # 3. Shutdown planner (stop motion)
         if planner is not None:
@@ -145,7 +157,8 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
                 print("[Cleanup] ✓ Planner shutdown")
             except Exception as e:
                 print(f"[Cleanup] ✗ Planner shutdown error: {e}")
-            planner = None
+            finally:
+                planner = None
 
         # 4. Wait for remaining stream time
         if plan_completed and stream_until is not None:
@@ -165,12 +178,12 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         except Exception as e:
             print(f"[Cleanup] ✗ Post-processing error: {e}")
 
-        # 6. Clean up detector
-        if detector is not None:
-            try:
-                detector = None
-            except Exception as e:
-                print(f"[Cleanup] ✗ Detector cleanup error: {e}")
+        # 6. Clean up raw samples and detector
+        try:
+            raw_samples.clear()
+            detector = None
+        except Exception as e:
+            print(f"[Cleanup] ✗ Cleanup error: {e}")
 
         # 7. Close OpenCV windows
         try:
@@ -180,7 +193,7 @@ def run(tag_ids: List[int] = [8], post_plan_stream_seconds: float = 1.0, task_na
         
         print("[Cleanup] ✓ Cleanup complete")
         
-        # Force garbage collection before returning
+        # Final garbage collection
         gc.collect()
     return processed
 

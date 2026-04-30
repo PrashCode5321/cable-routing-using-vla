@@ -1,12 +1,16 @@
+CHECKPOINT_PATH = "/home/rob/csci5551/openvla/runs/openvla-7b+my_robot_dataset+b16+lr-0.0005+lora-r32+dropout-0.0--image_aug"
 import warnings
 warnings.filterwarnings("ignore")
 
 from transformers import AutoModelForVision2Seq, AutoProcessor, AutoConfig, AutoImageProcessor
-
-from typing import List, Dict
 from PIL import Image
 import numpy as np
-import torch, h5py, cv2
+import torch, h5py, time
+from typing import List, Dict
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import JSONResponse
+import io
+
 from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
 from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
@@ -32,7 +36,6 @@ processor = AutoProcessor.from_pretrained(
 # )
 
 # Load directly from the patched checkpoint (with norm_stats already in config)
-CHECKPOINT_PATH = "/home/rob/csci5551/openvla/runs/openvla-7b+my_robot_dataset+b16+lr-0.0005+lora-r32+dropout-0.0--image_aug"
 print(f"Loading model from checkpoint: {CHECKPOINT_PATH}")
 
 vla = AutoModelForVision2Seq.from_pretrained(
@@ -43,20 +46,18 @@ vla = AutoModelForVision2Seq.from_pretrained(
     trust_remote_code=True,
     local_files_only=True,
 )
-vla = vla.to("cpu")
+vla = vla.to("cuda")
 print(f"Model loaded. norm_stats keys: {list(vla.norm_stats.keys()) if hasattr(vla, 'norm_stats') else 'None'}")
 
-def main(image: np.ndarray) -> List[float]:
-    
+def main(cv_image: np.ndarray, instruction: str) -> Dict[str, List[float]]:
     try:
         # Grab image input & format prompt
-        TASK_INSTRUCTION = "route the cable through bracket"
+        TASK_INSTRUCTION = instruction
         prompt = f"In: What action should the robot take to {TASK_INSTRUCTION}?\nOut:"
 
-        # Prepare inputs
-        image = Image.fromarray(image.astype(np.uint8))
-        inputs = processor(prompt, image).to("cpu", dtype=torch.float32)
-        
+        image: Image.Image = Image.fromarray(cv_image)
+        inputs = processor(prompt, image).to("cuda", dtype=torch.float32)
+
         # Debug: print input shapes
         print(f"Input shapes - input_ids: {inputs['input_ids'].shape}, pixel_values: {inputs['pixel_values'].shape}, attention_mask: {inputs['attention_mask'].shape}")
         
@@ -64,7 +65,7 @@ def main(image: np.ndarray) -> List[float]:
         print("Generating action tokens...")
         action_dim = len(vla.norm_stats["my_robot_dataset"]["action"]["q01"])
         print(f"Action dimension: {action_dim}")
-        
+
         with torch.no_grad():
             generated_ids = vla.generate(
                 inputs["input_ids"],
@@ -88,33 +89,43 @@ def main(image: np.ndarray) -> List[float]:
         norm_stats = vla.norm_stats["my_robot_dataset"]["action"]
         action = action * np.array(norm_stats["std"]) + np.array(norm_stats["mean"])
         print(f"Denormalized action: {action}")
-        
-        return action
+
+        return {"action": [float(i) for i in action]}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         raise e
-    finally:
-        pass
 
+# Initialize FastAPI app
+app = FastAPI(title="Robot Vision-Language Action API")
 
-def load_hdf5_episode(filepath: str) -> Dict[str, List[float] | List[str] | List[np.ndarray]]:
-    """Load episode data from HDF5 file."""
-    with h5py.File(filepath, 'r') as f:
-        print(len(f), print(list(f.keys())))
-        return {
-            "images":       f["observations/images"][:],
-            "ee_poses":     f["observations/ee_poses"][:],
-            "joint_states": f["observations/joint_states"][:],
-            "actions":      f["ee_actions"][:],
-        }
+@app.post("/predict-action")
+async def predict_action(image: UploadFile = File(...), instruction: str = Form(...)):
+    """
+    Predict robot action from image and instruction.
     
+    Args:
+        image: Image file (multipart/form-data)
+        instruction: Task instruction text
+        
+    Returns:
+        JSON with predicted actions
+    """
+    try:
+        # Read image file
+        contents = await image.file.read()
+        img_array = np.array(Image.open(io.BytesIO(contents)))
+        
+        # Get prediction
+        result = main(img_array, instruction)
+        return JSONResponse({"success": True, "data": result})
+    
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "ok", "model": "openvla-7b"}
 
 if __name__ == "__main__":
-    frames = load_hdf5_episode("/home/rob/csci5551/episodes/episode_0000.hdf5")
-    for frame, ee in zip(frames["images"], frames["ee_poses"]):
-        cv2.imshow("Image", frame)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        action = main(frame)
-        print(action, ee)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

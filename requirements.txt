@@ -15,5 +15,5 @@ draccus
 wandb
 packaging
 ninja
-tensorflow
-tensorflow-datasets
+tensorflow==2.15.0
+tensorflow-datasets==4.9.3

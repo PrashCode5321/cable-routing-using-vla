@@ -17,3 +17,7 @@ packaging
 ninja
 tensorflow==2.15.0
 tensorflow-datasets==4.9.3
+fastapi
+uvicorn
+requests
+opencv-python

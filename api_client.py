@@ -8,7 +8,7 @@ from PIL import Image
 import requests
 import io
 import numpy as np
-import h5py, time
+import h5py, time, cv2
 
 robot_ip  = presets.ROBOT_IP
 GRIPPER_LENGTH = 0.067 * 1000
@@ -31,6 +31,7 @@ def main():
 
             cv_image = zed.image
             cv_image = cv_image.astype(np.uint8, copy=False)
+            cv_image = cv2.resize(cv_image, (224, 224), interpolation=cv2.INTER_LINEAR)
             image: Image.Image = Image.fromarray(cv_image)
             img_bytes = io.BytesIO()
             image.save(img_bytes, format='PNG')

@@ -52,6 +52,7 @@ from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, Pr
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+
 # # === Utilities ===
 # # fmt: off
 # def create_vision_transform(vla: nn.Module, input_size: int) -> Callable[[Image.Image], torch.Tensor]:
@@ -114,11 +115,10 @@ def finetune(cfg: FinetuneConfig) -> None:
     print(f"Fine-tuning OpenVLA Model `{cfg.vla_path}` on `{cfg.dataset_name}`")
 
     # [Validate] Ensure GPU Available & Set Device / Distributed Context
-    # assert torch.cuda.is_available(), "Fine-tuning assumes at least one GPU is available!"
+    assert torch.cuda.is_available(), "Fine-tuning assumes at least one GPU is available!"
     distributed_state = PartialState()
-    # torch.cuda.set_device(device_id := distributed_state.local_process_index)
-    # torch.cuda.empty_cache()
-    device_id = "cpu"
+    torch.cuda.set_device(device_id := distributed_state.local_process_index)
+    torch.cuda.empty_cache()
 
     # Configure Unique Experiment ID & Log Directory
     exp_id = (
@@ -167,8 +167,7 @@ def finetune(cfg: FinetuneConfig) -> None:
     if cfg.use_quantization:
         vla = prepare_model_for_kbit_training(vla)
     else:
-        # vla = vla.to(device_id)
-        pass
+        vla = vla.to(device_id)
 
     # [LoRA] Wrap Model w/ PEFT `LoraConfig` =>> by default we set `target_modules=all-linear`
     if cfg.use_lora:
@@ -183,7 +182,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         vla.print_trainable_parameters()
 
     # Wrap VLA in PyTorch DDP Wrapper for Multi-GPU Training
-    # vla = DDP(vla, device_ids=[device_id], find_unused_parameters=True, gradient_as_bucket_view=True)
+    vla = DDP(vla, device_ids=[device_id], find_unused_parameters=True, gradient_as_bucket_view=True)
 
     # Create Optimizer =>> note that we default to a simple constant learning rate!
     trainable_params = [param for param in vla.parameters() if param.requires_grad]
@@ -217,7 +216,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         cfg.data_root_dir,
         cfg.dataset_name,
         batch_transform,
-        resize_resolution=tuple(vla.config.image_sizes),
+        resize_resolution=tuple(vla.module.config.image_sizes),
         shuffle_buffer_size=cfg.shuffle_buffer_size,
         image_aug=cfg.image_aug,
     )
@@ -252,7 +251,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         vla.train()
         optimizer.zero_grad()
         for batch_idx, batch in enumerate(dataloader):
-            with torch.autocast("cpu", dtype=torch.bfloat16):
+            with torch.autocast("cuda", dtype=torch.bfloat16):
                 output: CausalLMOutputWithPast = vla(
                     input_ids=batch["input_ids"].to(device_id),
                     attention_mask=batch["attention_mask"].to(device_id),
@@ -268,7 +267,7 @@ def finetune(cfg: FinetuneConfig) -> None:
             normalized_loss.backward()
 
             # Compute Accuracy and L1 Loss for Logging
-            action_logits = output.logits[:, vla.vision_backbone.featurizer.patch_embed.num_patches : -1]
+            action_logits = output.logits[:, vla.module.vision_backbone.featurizer.patch_embed.num_patches : -1]
             action_preds = action_logits.argmax(dim=2)
             action_gt = batch["labels"][:, 1:].to(action_preds.device)
             mask = action_gt > action_tokenizer.action_token_begin_idx
@@ -328,10 +327,10 @@ def finetune(cfg: FinetuneConfig) -> None:
 
                     # Save Processor & Weights
                     processor.save_pretrained(run_dir)
-                    vla.save_pretrained(save_dir)
+                    vla.module.save_pretrained(save_dir)
 
                 # Wait for processor and adapter weights to be saved by main process
-                # dist.barrier()
+                dist.barrier()
 
                 # Merge LoRA weights into model backbone for faster inference
                 #   =>> Note that merging is slow and can be done post-hoc to speed up training
@@ -363,7 +362,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                             print(f"Saved Model Checkpoint for Step {gradient_step_idx} at: {checkpoint_dir}")
 
                 # Block on Main Process Checkpointing
-                # dist.barrier()
+                dist.barrier()
 
             # Stop training when max_steps is reached
             if gradient_step_idx == cfg.max_steps:

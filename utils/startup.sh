@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # Update package manager
 echo "Updating package manager..."
@@ -23,42 +22,43 @@ source venv/bin/activate
 echo "Upgrading pip..."
 pip install --upgrade pip
 
-# Clone repositories
-echo "Cloning cable-routing-using-vla repository..."
-git clone https://github.com/PrashCode5321/cable-routing-using-vla.git
-
+# Clone repository
 echo "Cloning openvla repository..."
 git clone https://github.com/openvla/openvla.git
+cd openvla
+
+echo "Fetch changes from cable-routing-using-vla repo"
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/configs.py
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/mixtures.py
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/transforms.py
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/requirements.txt
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/patch_checkpoint_with_stats.py
+
+mv configs.py prismatic/vla/datasets/rlds/oxe/
+mv transforms.py prismatic/vla/datasets/rlds/oxe/
+mv mixtures.py prismatic/vla/datasets/rlds/oxe/
 
 # Install requirements from first repo
 echo "Installing requirements from cable-routing-using-vla..."
-cd cable-routing-using-vla
 pip install -r requirements.txt
-cd ..
 
 # Install second repo in editable mode
 echo "Installing openvla in editable mode..."
-cd openvla
 pip install -e .
-cd ..
 
 echo "Setup complete!"
 
-cp cable-routing-using-vla/openvla_utils/configs.py openvla/prismatic/vla/datasets/rlds/oxe/configs.py
-cp cable-routing-using-vla/openvla_utils/transforms.py openvla/prismatic/vla/datasets/rlds/oxe/transforms.py
-cp cable-routing-using-vla/openvla_utils/mixtures.py openvla/prismatic/vla/datasets/rlds/oxe/mixtures.py
-
 # download model artifacts from Google Drive
 python3 -m pip install gdown
-gdown https://drive.google.com/uc?id=1__FlqKFAGThQWD2fYcB2Ts0R_4I2s7_8 -o artifacts.zip
-unzip artifacts.zip
-mv artifacts/content/openvla/ openvla/
+gdown https://drive.google.com/uc?id=1__FlqKFAGThQWD2fYcB2Ts0R_4I2s7_8
+unzip folder_name.zip
+mv content/openvla/runs/ .
 
 # Find the run directory dynamically
-RUN_DIR=$(ls -d openvla/runs/*/ | head -1 | sed 's:/$::')
+RUN_DIR=$(realpath $(ls -d runs/*/ | head -1 | sed 's:/$::'))
 echo "Found run directory: $RUN_DIR"
-python3 cable-routing-using-vla/openvla_utils/patch_checkpoint_with_stats.py "$RUN_DIR" my_robot_dataset
+python3 patch_checkpoint_with_stats.py "$RUN_DIR" my_robot_dataset
 
-cp cable-routing-using-vla/api.py openvla/api.py  
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/api.py
 python3 -m pip install fastapi uvicorn
 python3 api.py  

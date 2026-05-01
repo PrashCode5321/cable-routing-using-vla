@@ -31,8 +31,6 @@ echo "Fetch changes from cable-routing-using-vla repo"
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/configs.py
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/mixtures.py
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/transforms.py
-wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/requirements.txt
-wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/patch_checkpoint_with_stats.py
 
 mv configs.py prismatic/vla/datasets/rlds/oxe/
 mv transforms.py prismatic/vla/datasets/rlds/oxe/
@@ -40,6 +38,7 @@ mv mixtures.py prismatic/vla/datasets/rlds/oxe/
 
 # Install requirements from first repo
 echo "Installing requirements from cable-routing-using-vla..."
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/requirements.txt
 pip install -r requirements.txt
 
 # Install second repo in editable mode
@@ -55,10 +54,11 @@ unzip folder_name.zip
 mv content/openvla/runs/ .
 
 # Find the run directory dynamically
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/patch_checkpoint_with_stats.py
 RUN_DIR=$(realpath $(ls -d runs/*/ | head -1 | sed 's:/$::'))
 echo "Found run directory: $RUN_DIR"
 python3 patch_checkpoint_with_stats.py "$RUN_DIR" my_robot_dataset
 
-wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/api.py
+wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/api_server.py
 python3 -m pip install fastapi uvicorn
-python3 api.py  
+python3 api_server.py  

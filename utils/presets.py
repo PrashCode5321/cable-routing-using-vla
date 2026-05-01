@@ -5,3 +5,4 @@ GRIPPER_LENGTH = 0.067 * 1000
 TAG_SIZE = 0.08
 SPEED = 80  # conservative speed for precision work
 LOG_LEVEL = logging.INFO
+API_URL = "http://localhost:8000"

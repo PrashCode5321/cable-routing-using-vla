@@ -2,25 +2,15 @@
 
 # Update package manager
 echo "Updating package manager..."
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt-get update
-
-# Install Python 3.10 and dependencies
-echo "Installing Python 3.10..."
-sudo apt-get install -y python3.10 python3.10-venv python3.10-dev python3.10-distutils python3-pip
-
-# Install git if not already available
-echo "Installing git..."
-sudo apt-get install -y git
-
-# Create Python 3.10 virtual environment
-echo "Creating Python 3.10 virtual environment..."
-python3.10 -m venv venv
-source venv/bin/activate
-
-# Upgrade pip
-echo "Upgrading pip..."
-pip install --upgrade pip
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh -b -p ~/miniconda3
+source ~/miniconda3/bin/activate
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+conda create -n py310 python=3.10 -y
+conda activate py310
+curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+/venv/py310/bin/python3 get-pip.py
 
 # Clone repository
 echo "Cloning openvla repository..."
@@ -48,6 +38,7 @@ python3 -m pip install -e .
 echo "Setup complete!"
 
 # download model artifacts from Google Drive
+echo "Fetch trained weights"
 python3 -m pip install gdown
 gdown https://drive.google.com/uc?id=1__FlqKFAGThQWD2fYcB2Ts0R_4I2s7_8
 sudo apt install -y unzip
@@ -61,6 +52,7 @@ RUN_DIR=$(realpath $(ls -d runs/*/ | head -1 | sed 's:/$::'))
 echo "Found run directory: $RUN_DIR"
 python3 patch_checkpoint_with_stats.py "$RUN_DIR" my_robot_dataset
 
+echo "Launch the FastAPI"
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/api_server.py
-python3 -m pip install fastapi uvicorn python-multipart
-python3 api_server.py  
+python3 -m pip install fastapi uvicorn python-multipart pillow
+python3 api_server.py --port 8000

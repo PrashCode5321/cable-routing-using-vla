@@ -115,7 +115,7 @@ async def predict_action(image: UploadFile = File(...), instruction: str = Form(
     """
     try:
         # Read image file
-        contents = await image.file.read()
+        contents = await image.read()
         img_array = np.array(Image.open(io.BytesIO(contents)))
         
         # Get prediction

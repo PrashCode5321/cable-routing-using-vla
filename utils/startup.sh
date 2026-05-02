@@ -62,5 +62,5 @@ echo "Found run directory: $RUN_DIR"
 python3 patch_checkpoint_with_stats.py "$RUN_DIR" my_robot_dataset
 
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/api_server.py
-python3 -m pip install fastapi uvicorn
+python3 -m pip install fastapi uvicorn python-multipart
 python3 api_server.py  

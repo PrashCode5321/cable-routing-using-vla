@@ -65,9 +65,9 @@ def main():
             _, pose = arm.get_position(is_radian=False)
             x, y, z, roll, pitch, yaw = pose
 
-            new_x = x + dx + 5
-            new_y = y + dy + 5
-            new_z = z + dz + 5
+            new_x = x + dx
+            new_y = y + dy
+            new_z = z + dz
 
             new_roll  = roll + droll
             new_pitch = pitch + dpitch

@@ -39,11 +39,11 @@ mv mixtures.py prismatic/vla/datasets/rlds/oxe/
 # Install requirements from first repo
 echo "Installing requirements from cable-routing-using-vla..."
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/requirements.txt
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 # Install second repo in editable mode
 echo "Installing openvla in editable mode..."
-pip install -e .
+python3 -m pip install -e .
 
 echo "Setup complete!"
 

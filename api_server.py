@@ -48,7 +48,7 @@ vla = AutoModelForVision2Seq.from_pretrained(
     torch_dtype=torch.float32,
     low_cpu_mem_usage=True,
     trust_remote_code=True,
-    local_files_only=True,
+    # local_files_only=True,
 )
 vla = vla.to("cuda")
 print(f"Model loaded. norm_stats keys: {list(vla.norm_stats.keys()) if hasattr(vla, 'norm_stats') else 'None'}")
@@ -132,4 +132,8 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=23893)
+    args = parser.parse_args()
+    uvicorn.run(app, host="0.0.0.0", port=args.port)

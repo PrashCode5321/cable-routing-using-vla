@@ -50,8 +50,10 @@ echo "Setup complete!"
 # download model artifacts from Google Drive
 python3 -m pip install gdown
 gdown https://drive.google.com/uc?id=1__FlqKFAGThQWD2fYcB2Ts0R_4I2s7_8
+sudo apt install -y unzip
 unzip folder_name.zip
 mv content/openvla/runs/ .
+rm -rf content/openvla/
 
 # Find the run directory dynamically
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/openvla_utils/patch_checkpoint_with_stats.py

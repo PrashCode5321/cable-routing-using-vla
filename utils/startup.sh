@@ -11,6 +11,7 @@ conda create -n py310 python=3.10 -y
 conda activate py310
 curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
 /venv/py310/bin/python3 get-pip.py
+sudo apt install -y nano
 
 # Clone repository
 echo "Cloning openvla repository..."
@@ -52,7 +53,18 @@ RUN_DIR=$(realpath $(ls -d runs/*/ | head -1 | sed 's:/$::'))
 echo "Found run directory: $RUN_DIR"
 python3 patch_checkpoint_with_stats.py "$RUN_DIR" my_robot_dataset
 
+# Configured this because my API was not working
+# 6. Configure caddy
+mkdir -p /etc/caddy
+cat > /etc/caddy/Caddyfile << 'EOF'
+:1111 {
+    reverse_proxy 127.0.0.1:9000
+}
+EOF
+caddy reload --config /etc/caddy/Caddyfile
+
+# Launch API
 echo "Launch the FastAPI"
 wget https://raw.githubusercontent.com/PrashCode5321/cable-routing-using-vla/refs/heads/main/api_server.py
 python3 -m pip install fastapi uvicorn python-multipart pillow
-python3 api_server.py --port 8000
+python3 api_server.py --port 9000

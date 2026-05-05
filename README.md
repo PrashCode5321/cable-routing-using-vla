@@ -66,6 +66,12 @@ python stream.py --tag-ids 8 --fps 5
 - Saves to HDF5 format with RLDS standard structure
 - Generates demonstration videos
 
+**Example Demonstrations:**
+
+| Demonstration | Expected Behavior |
+|:---:|:---:|
+| ![Demonstration](media/demonstration.gif) | ![Expected Behavior](media/expected.gif) |
+
 ### 2. Fine-tuning OpenVLA
 - Load the collated episodes to Google Drive in zip format
 - Do this on Google Colab Pro. Use the notebook [here](openvla_colab.ipynb)
@@ -81,7 +87,34 @@ Load the [shell script](utils/startup.sh) there and run it.
 python api_server.py
 ```
 Then use the [client](api_client.py) to stream robot state and receive VLA output.
-For more information on inference, refer [this guide](MODIFICATIONS.md).
+For more information on inference, refer [this guide](MODIFICATIONS.md).  
+   
+| Model Inference |
+|:---:|
+| ![Inference](media/inference.gif)|
+
+#### Current Limitations & Multi-Perspective Solution
+
+The model achieves accurate approach trajectories but **fails to successfully place cables into brackets** during evaluation. The root cause is a **critical camera view obstruction**: as the robot's end-effector lowers to insert the cable into the bracket groove, the primary camera view (mounted above) becomes obstructed by the robot arm itself. Consequently, the model never observes the actual cable placement action and fails to learn the fine-grained insertion dynamics required for task completion.
+
+**The Challenge:**
+- Primary perspective: Obstructed during the critical insertion phase
+- Model learns accurate approach but has no visual feedback for the lowering/insertion step
+- Evaluation success rate: 0% (cable not inserted into bracket for 25 test cases)
+
+**The Solution:**
+To address this limitation, augment the training data with **multi-perspective observations**:
+- **Primary Perspective**: RGB view from the main overhead camera (approach phase)
+- **Secondary Perspective**: RGB view from an alternate angle (side or angled view to capture insertion)
+- **POV Perspective**: End-effector mounted camera or close-up view (gripper-level view of cable positioning)
+
+By fine-tuning the model with observations from multiple synchronized viewpoints, the VLA can learn:
+1. What the end-effector and cable look like during insertion
+2. The correct gripper positioning and lowering trajectory
+3. How to complete the insertion phase when the primary view is obstructed
+
+This multi-modal approach enables the model to develop robust representations that compensate for single-view limitations and achieve high success rates on cable placement tasks.
+
 
 ## References
 

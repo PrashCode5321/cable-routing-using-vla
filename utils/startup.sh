@@ -58,7 +58,7 @@ python3 patch_checkpoint_with_stats.py "$RUN_DIR" my_robot_dataset
 mkdir -p /etc/caddy
 cat > /etc/caddy/Caddyfile << 'EOF'
 :1111 {
-    reverse_proxy 127.0.0.1:9000
+    reverse_proxy 0.0.0.0:9000
 }
 EOF
 caddy reload --config /etc/caddy/Caddyfile
